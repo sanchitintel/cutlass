@@ -37,6 +37,7 @@
 #include "cute/atom/mma_atom.hpp"
 #include "cute/algorithm/gemm.hpp"
 #include "cute/tensor_predicate.hpp"
+#include "cutlass/fp8_to_fp16.h"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -217,9 +218,16 @@ struct CollectiveMma<MainloopIntelXeXMX16Group<Stages, Schedule>, TileShape_, El
     // Partition global counting tensors for MMA
     Tensor tCgA = thr_mma.partition_A(gA);
     Tensor tCgB = thr_mma.partition_B(gB);
+    using element_dtype =
+    std::conditional_t< std::is_same_v<ElementA, float_e4m3_t> || std::is_same_v<ElementA, float_e5m2_t>,
+                        uint8_t,          // if ElementA == float_e4m3_t
+                        ElementA>; 
 
-    Tensor tCrA = make_tensor<ElementA>(make_fragment_layout(tiled_copy_a, tCgA(_,_,_,0).shape()));
-    Tensor tCrB = make_tensor<ElementB>(make_fragment_layout(tiled_copy_b, tCgB(_,_,_,0).shape()));
+    Tensor tCrA = make_tensor<element_dtype>(make_fragment_layout(tiled_copy_a, tCgA(_,_,_,0).shape()));
+    Tensor tCrB = make_tensor<element_dtype>(make_fragment_layout(tiled_copy_b, tCgB(_,_,_,0).shape()));
+
+    Tensor tCrA_fp16 = make_fragment_like<half_t>(tCrA);
+    Tensor tCrB_fp16 = make_fragment_like<half_t>(tCrB);
   
     // Retile registers for copies
     Tensor tArA = thr_copy_A.retile_D(tCrA);
@@ -275,12 +283,21 @@ struct CollectiveMma<MainloopIntelXeXMX16Group<Stages, Schedule>, TileShape_, El
       copy(tiled_copy_a, tAgA(_,_,_,k_tile), tArA);
       copy(tiled_copy_b, tBgB(_,_,_,k_tile), tBrB);
 
+      if constexpr (std::is_same_v<ElementA, float_e4m3_t> || std::is_same_v<ElementA, float_e5m2_t>) {
+        convert_FP8_to_FP16<ElementA>(tCrA, tCrA_fp16);
+        convert_FP8_to_FP16<ElementB>(tCrB, tCrB_fp16);
+      }
+
       if (prefetch_k < k_tile_count) {
         prefetch(tiled_prefetch_a, pAgA(_, _, _, prefetch_k));
         prefetch(tiled_prefetch_b, pBgB(_, _, _, prefetch_k));
       }
 
-      cute::gemm(tiled_mma, tCrA, tCrB, accum);
+      if constexpr (std::is_same_v<ElementA, float_e4m3_t> || std::is_same_v<ElementA, float_e5m2_t>) {
+        cute::gemm(tiled_mma, tCrA_fp16, tCrB_fp16, accum);
+      } else {
+        cute::gemm(tiled_mma, tCrA, tCrB, accum);        
+      }
       barrier_wait(barrier_scope);
     }
   }
