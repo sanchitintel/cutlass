@@ -114,6 +114,7 @@ struct GroupGEMMOptions {
   float beta = 0.f;
   int iterations;
   int m, n, k, groups;
+  int* num_rows_per_expert = nullptr;
   std::vector<typename ProblemShape::UnderlyingProblemShape> problem_sizes_host;
 
   GroupGEMMOptions()
@@ -124,18 +125,18 @@ struct GroupGEMMOptions {
     }
   }
 
-  void parse(const int num_experts, const int *num_tokens_per_expert, int moe_n,
-             int moe_k) {
+  void parse(const int num_experts, const int *num_tokens_per_expert_host, int moe_n,
+             int moe_k, const int* num_tokens_per_expert_device=nullptr) {
     n = moe_n;
     k = moe_k;
     groups = num_experts;
     iterations = 100;
-
+    num_rows_per_expert = const_cast<int*>(num_tokens_per_expert_device);
     assert(groups > 0);
     problem_sizes_host.clear();
     problem_sizes_host.reserve(groups);
     for (int i = 0; i < groups; i++) {
-      problem_sizes_host.push_back({num_tokens_per_expert[i], n, k});
+      problem_sizes_host.push_back({num_tokens_per_expert_host[i], n, k});
     }
   }
 
@@ -490,7 +491,7 @@ template <class Gemm> struct ExampleRunner {
                     const cutlass::KernelHardwareInfo &hw_info) {
     typename Gemm::Arguments arguments;
     decltype(arguments.epilogue.thread) fusion_args;
-    bool host_problem_shapes_available = true;
+    bool host_problem_shapes_available = false;
     if (options.alpha != FLT_MAX && options.beta != FLT_MAX) {
       // If both alpha/beta are provided (via cmd line args) and are scalar,
       // i.e., same alpha/beta applies to all batches.
@@ -530,7 +531,8 @@ template <class Gemm> struct ExampleRunner {
           {fusion_args, ptr_C.get(), stride_C.get(), ptr_D.get(),
            stride_D.get()},
           hw_info,
-          {1, RasterOrderOptions::AlongN}};
+          {1, RasterOrderOptions::AlongN},
+          options.num_rows_per_expert};
     } else {
       arguments = typename Gemm::Arguments{
           cutlass::gemm::GemmUniversalMode::kGrouped,
@@ -539,7 +541,8 @@ template <class Gemm> struct ExampleRunner {
           {fusion_args, ptr_C.get(), stride_C.get(), ptr_D.get(),
            stride_D.get()},
           hw_info,
-          {1, RasterOrderOptions::AlongN}};
+          {1, RasterOrderOptions::AlongN},
+          options.num_rows_per_expert};
     }
 
     return arguments;
@@ -572,7 +575,7 @@ template <class Gemm> struct ExampleRunner {
     std::cout << "Disposition: " << (passed ? "Passed" : "Failed") << std::endl;
     initialize_for_moe_gemm(options);
 
-    // if(!passed) return cutlass::Status::kErrorInternal;
+    if(!passed) return cutlass::Status::kErrorInternal;
 
     if (options.iterations > 0) {
       GPU_Clock timer;
@@ -605,13 +608,19 @@ template <class Gemm> struct ExampleRunner {
 
 void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
              float *outputs, const int gemm_n, const int gemm_k,
-             const int *total_rows_for_each_expert, const int num_experts) {
+             const int *num_rows_per_expert_device, const int num_experts) {
   GroupGEMMOptions options;
-  options.parse(num_experts, total_rows_for_each_expert, gemm_n, gemm_k);
+  
   // The KernelHardwareInfo struct holds the number of EUs on the GPU with a
   // given device ID. This information is used by the underlying kernel.
   cutlass::KernelHardwareInfo hw_info;
   int num_tokens_incl_duplicated = 0;
+  int total_rows_for_each_expert[128];
+  cutlass::DeviceAllocation<int32_t> num_rows_per_expert_obj;
+  num_rows_per_expert_obj.reset(const_cast<int32_t*>(num_rows_per_expert_device), 128);
+  num_rows_per_expert_obj.copy_to_host(total_rows_for_each_expert);
+  options.parse(num_experts, total_rows_for_each_expert, gemm_n, gemm_k, num_rows_per_expert_device);
+
   for (int i = 0; i < num_experts; i++) {
     num_tokens_incl_duplicated += total_rows_for_each_expert[i];
   }
@@ -644,7 +653,7 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
   constexpr int PipelineStages = 2;
   // Dispatch to grouped gemm algorithm
   using GEMMDispatchPolicy =
-      cutlass::gemm::MainloopIntelXeXMX16Group<PipelineStages>;
+      cutlass::gemm::MainloopIntelXeXMX16Group<PipelineStages, cutlass::gemm::KernelXeMoEGEMM>;
   using EpilogueDispatchPolicy = cutlass::epilogue::IntelXeXMX16Group;
 
   using EpilogueOp = cutlass::epilogue::fusion::LinearCombination<
@@ -680,7 +689,15 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
 
   runner.run(options, hw_info, activations, weights, outputs, A_size, B_size,
              C_size);
+  num_rows_per_expert_obj.release();
 }
+
+void MoEGEMMWrapper(const bfloat16_t *activations, const bfloat16_t *weights,
+             float *outputs, const int gemm_n, const int gemm_k,
+             const int *total_rows_for_each_expert, const int num_experts, const int* num_rows_per_expert_device) {
+
+}
+
 
 int main(int argc, const char **argv) {
   int total_rows_for_each_expert[128] = {
@@ -692,7 +709,7 @@ int main(int argc, const char **argv) {
       23, 36, 29, 14, 4,  28, 5,  1,  36, 5,  31, 36, 26, 32, 6,  21, 32, 39,
       27, 12, 37, 6,  6,  39, 0,  16, 39, 34, 19, 13};
 
-  const int num_experts = 8;
+  const int num_experts = 128;
 
   int num_tokens_incl_duplicated = 0;
   for (int i = 0; i < num_experts; i++) {
@@ -701,13 +718,15 @@ int main(int argc, const char **argv) {
   int n_moe = 32;
   int k_moe = 32;
 
-
+  cutlass::DeviceAllocation<int32_t> num_rows_per_expert_device;
   cutlass::DeviceAllocation<bfloat16_t> activations_data;
   cutlass::DeviceAllocation<bfloat16_t> weights_data;
   cutlass::DeviceAllocation<float> output_data;
   size_t A_size = num_tokens_incl_duplicated * k_moe;
   size_t B_size = num_experts * n_moe * k_moe;
   size_t C_size = num_tokens_incl_duplicated * n_moe;
+  num_rows_per_expert_device.reset(128);
+  num_rows_per_expert_device.copy_from_host(total_rows_for_each_expert);
   activations_data.reset(A_size);
   weights_data.reset(B_size);
   output_data.reset(C_size);
@@ -715,10 +734,11 @@ int main(int argc, const char **argv) {
   initialize_block(activations_data, seed + 2023);
   initialize_block(weights_data, seed + 2022);
   initialize_block(output_data, seed + 2021);
-
   MoEGEMM(activations_data.get(), weights_data.get(), output_data.get(), n_moe,
-          k_moe, total_rows_for_each_expert, num_experts);
-  printf(
-      "\n\nComputation done. The memory error seen doesn't affect accuracy\n");
+          k_moe, num_rows_per_expert_device.get(), num_experts);
+  activations_data.release();
+  weights_data.release();
+  output_data.release();
+  num_rows_per_expert_device.release();
   return 0;
 }

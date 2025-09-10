@@ -68,9 +68,10 @@ struct GroupProblemShape {
 
   CUTLASS_HOST_DEVICE
   UnderlyingProblemShape const
-  get_problem_shape(int32_t group_idx, const int32_t* num_rows_per_expert) {
-    const int N = problem_shapes[group_idx][1];
-    const int K = problem_shapes[group_idx][2];
+  get_problem_shape(int32_t group_idx, const int32_t* num_rows_per_expert) const {
+    auto problem = problem_shapes[group_idx];
+    const int N = get<1>(problem);
+    const int K = get<2>(problem);
     return UnderlyingProblemShape(num_rows_per_expert[group_idx], N, K);
   }
 

@@ -37,6 +37,7 @@
 #include "cute/atom/mma_atom.hpp"
 #include "cute/algorithm/gemm.hpp"
 #include "cute/tensor_predicate.hpp"
+#include "../tools/util/include/cutlass/util/packed_stride.hpp"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -311,8 +312,8 @@ struct CollectiveMma<MainloopIntelXeXMX16Group<Stages, Schedule>, TileShape_, El
       ElementA const* ptr_A_curr_batch = reinterpret_cast<ElementA const*>(mainloop_params.ptr_A[next_group]) + cumulative_M * K;
       ElementB const* ptr_B_curr_batch = reinterpret_cast<ElementB const*>(mainloop_params.ptr_B[next_group]) + next_group * K * N;
 
-      Tensor mA = make_tensor(make_gmem_ptr(ptr_A_curr_batch), make_shape(M, K,(int32_t)1), make_cute_packed_stride(InternalStrideA{}, {M, K, 1}));
-      Tensor mB = make_tensor(make_gmem_ptr(ptr_B_curr_batch), make_shape(N, K,(int32_t)1), make_cute_packed_stride(InternalStrideB{}, {N, K, 1}));
+      Tensor mA = make_tensor(make_gmem_ptr(ptr_A_curr_batch), make_shape(M, K,(int32_t)1), cutlass::make_cute_packed_stride(InternalStrideA{}, {M, K, 1}));
+      Tensor mB = make_tensor(make_gmem_ptr(ptr_B_curr_batch), make_shape(N, K,(int32_t)1), cutlass::make_cute_packed_stride(InternalStrideB{}, {N, K, 1}));
 
       return cute::make_tuple(mA, mB);
     }

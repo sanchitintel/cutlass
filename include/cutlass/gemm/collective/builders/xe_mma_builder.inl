@@ -190,7 +190,7 @@ struct CollectiveBuilder<
                                   Layout<TileShape_MNK>,
                                   Layout<Shape<atoms_M, atoms_N, _1>, Stride<atoms_N, _1, _0>>>::TiledMMA;
 
-      static constexpr bool IsGroup = cute::is_same_v<KernelScheduleType, KernelXePtrArrayCooperative, KernelXeMoEGEMM>;
+      static constexpr bool IsGroup = cute::is_same_v<KernelScheduleType, KernelXePtrArrayCooperative> || cute::is_same_v<KernelScheduleType, KernelXeMoEGEMM>;
 
       using KernelSchedule = std::conditional_t<cute::is_same_v<KernelScheduleType, KernelScheduleAuto>, KernelXe, KernelScheduleType>;
       static constexpr int PipelineStages = IsGroup ? 2 : 3;

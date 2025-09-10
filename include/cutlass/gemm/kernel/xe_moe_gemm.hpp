@@ -152,7 +152,6 @@ public:
   Params
   to_underlying_arguments(Arguments const& args, void* workspace) {
     CUTLASS_TRACE_HOST("to_underlying_arguments():");
-    printf("\nPrint once\n");
     auto problem_shape = args.problem_shape;
 
     // Get SM count if needed, otherwise use user supplied SM count
