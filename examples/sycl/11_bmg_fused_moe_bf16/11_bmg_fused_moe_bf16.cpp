@@ -332,7 +332,83 @@ template <class Gemm> struct ExampleRunner {
   }
 
   /// Initialize operands to be used in the GEMM and reference GEMM
-  void initialize(const GroupGEMMOptions &options) {
+  void initialize_for_moe_gemm(const GroupGEMMOptions &options) {
+
+    problem_sizes.reset(options.groups);
+    problem_sizes.copy_from_host(options.problem_sizes_host.data());
+
+    //
+    // Assign pointers
+    //
+
+    std::vector<ElementA *> ptr_A_host(options.groups);
+    std::vector<ElementB *> ptr_B_host(options.groups);
+    std::vector<ElementC *> ptr_C_host(options.groups);
+    std::vector<ElementC *> ptr_D_host(options.groups);
+    std::vector<ElementAccumulator *> ptr_alpha_host(options.groups);
+    std::vector<ElementAccumulator *> ptr_beta_host(options.groups);
+
+    // Compute offsets, alpha & beta over group on host
+    for (int32_t i = 0; i < options.groups; ++i) {
+      ptr_A_host.at(i) = block_A.get();
+      ptr_B_host.at(i) = block_B.get();
+      ptr_C_host.at(i) = block_C.get();
+      ptr_D_host.at(i) = block_D.get();
+      // Fill host vector of alpha & beta with random values if using per-group
+      // values
+      alpha_host.push_back(
+          (options.alpha == FLT_MAX)
+              ? static_cast<ElementAccumulator>((rand() % 5) + 1)
+              : options.alpha);
+      beta_host.push_back((options.beta == FLT_MAX)
+                              ? static_cast<ElementAccumulator>(rand() % 5)
+                              : options.beta);
+      // Fill host ptr vectors with offset addresses into device alpha/beta
+      // blocks
+      ptr_alpha_host.at(i) = block_alpha.get() + i;
+      ptr_beta_host.at(i) = block_beta.get() + i;
+    }
+
+    // Allocate device memory & copy from host
+    ptr_A.reset(options.groups);
+    // Per-group alpha and beta
+    ptr_A.copy_from_host(ptr_A_host.data());
+
+    ptr_B.reset(options.groups);
+    ptr_B.copy_from_host(ptr_B_host.data());
+
+    ptr_C.reset(options.groups);
+    ptr_C.copy_from_host(ptr_C_host.data());
+
+    ptr_D.reset(options.groups);
+    ptr_D.copy_from_host(ptr_D_host.data());
+
+    stride_A.reset(options.groups);
+    stride_A.copy_from_host(stride_A_host.data());
+
+    stride_B.reset(options.groups);
+    stride_B.copy_from_host(stride_B_host.data());
+
+    stride_C.reset(options.groups);
+    stride_C.copy_from_host(stride_C_host.data());
+
+    stride_D.reset(options.groups);
+    stride_D.copy_from_host(stride_D_host.data());
+
+    // Per-group alpha and beta ptrs
+    alpha_device.reset(options.groups);
+    alpha_device.copy_from_host(ptr_alpha_host.data());
+    beta_device.reset(options.groups);
+    beta_device.copy_from_host(ptr_beta_host.data());
+
+    // Per-group alpha and beta values - note these are not directly passed to
+    // kernel - the pointers (alpha_device/beta_device) are passed instead
+    block_alpha.copy_from_host(alpha_host.data());
+    block_beta.copy_from_host(beta_host.data());
+  }
+
+  /// Initialize operands to be used in the GEMM and reference GEMM
+  void initialize_for_ref_gemm(const GroupGEMMOptions &options) {
 
     problem_sizes.reset(options.groups);
     problem_sizes.copy_from_host(options.problem_sizes_host.data());
@@ -407,6 +483,7 @@ template <class Gemm> struct ExampleRunner {
     block_beta.copy_from_host(beta_host.data());
   }
 
+
   /// Populates a Gemm::Arguments structure from the given commandline options
   typename Gemm::Arguments
   args_from_options(const GroupGEMMOptions &options,
@@ -473,7 +550,7 @@ template <class Gemm> struct ExampleRunner {
                       const ElementA *A_ptr, const ElementA *B_ptr,
                       float *C_ptr, int A_size, int B_size, int C_size) {
     allocate(options, A_ptr, B_ptr, C_ptr, A_size, B_size, C_size);
-    initialize(options);
+    initialize_for_moe_gemm(options);
 
     Gemm gemm_op;
     auto arguments = args_from_options(options, hw_info);
@@ -489,10 +566,11 @@ template <class Gemm> struct ExampleRunner {
     CUTLASS_CHECK(gemm_op.run());
 
     syclcompat::wait();
-
+    initialize_for_ref_gemm(options);
     // Verify that the result is correct
     bool passed = verify(options);
     std::cout << "Disposition: " << (passed ? "Passed" : "Failed") << std::endl;
+    initialize_for_moe_gemm(options);
 
     // if(!passed) return cutlass::Status::kErrorInternal;
 
@@ -605,7 +683,7 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
 }
 
 int main(int argc, const char **argv) {
-  int total_rows_for_each_expert[] = {
+  int total_rows_for_each_expert[128] = {
       23, 16, 15, 4,  9,  36, 20, 20, 26, 26, 9,  31, 36, 3,  30, 15, 12, 6,
       28, 18, 3,  12, 16, 9,  18, 17, 38, 14, 36, 16, 24, 34, 22, 4,  27, 21,
       16, 39, 30, 19, 6,  35, 23, 29, 1,  11, 29, 13, 6,  25, 27, 26, 19, 8,
@@ -622,6 +700,7 @@ int main(int argc, const char **argv) {
   }
   int n_moe = 32;
   int k_moe = 32;
+
 
   cutlass::DeviceAllocation<bfloat16_t> activations_data;
   cutlass::DeviceAllocation<bfloat16_t> weights_data;
