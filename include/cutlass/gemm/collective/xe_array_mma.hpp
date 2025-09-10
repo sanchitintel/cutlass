@@ -309,7 +309,7 @@ struct CollectiveMma<MainloopIntelXeXMX16Group<Stages, Schedule>, TileShape_, El
       const int32_t N = get<1>(problem_shape_mnkl);
       const int32_t K = get<2>(problem_shape_mnkl);
 
-      ElementA const* ptr_A_curr_batch = reinterpret_cast<ElementA const*>(mainloop_params.ptr_A[next_group]) + cumulative_M * K;
+      ElementA const* ptr_A_curr_batch = reinterpret_cast<ElementA const*>(mainloop_params.ptr_A[next_group]) + (cumulative_M - M) * K;
       ElementB const* ptr_B_curr_batch = reinterpret_cast<ElementB const*>(mainloop_params.ptr_B[next_group]) + next_group * K * N;
 
       Tensor mA = make_tensor(make_gmem_ptr(ptr_A_curr_batch), make_shape(M, K,(int32_t)1), cutlass::make_cute_packed_stride(InternalStrideA{}, {M, K, 1}));

@@ -491,13 +491,13 @@ public:
       TensorC mC_mnl;
       TensorD mD_mnl;
       if constexpr (is_source_supported) {
-        ElementC const* ptr_C_curr_batch = reinterpret_cast<ElementC const*>(params.ptr_C[next_group]) + cumulative_M * N;
-        mC_mnl = make_tensor(make_gmem_ptr(ptr_C_curr_batch), make_layout(make_shape(M, N, L), cutlass::make_cute_packed_stride(InternalStrideC{}, {cumulative_M, N, 1})));
+        ElementC const* ptr_C_curr_batch = reinterpret_cast<ElementC const*>(params.ptr_C[next_group]) + (cumulative_M - M) * N;
+        mC_mnl = make_tensor(make_gmem_ptr(ptr_C_curr_batch), make_layout(make_shape(M, N, L), cutlass::make_cute_packed_stride(InternalStrideC{}, {M, N, 1})));
       }
 
       if constexpr (is_destination_supported) {
-        ElementD* ptr_D_curr_batch = reinterpret_cast<ElementD*>(params.ptr_D[next_group]) + cumulative_M * N;
-        mD_mnl = make_tensor(make_gmem_ptr(ptr_D_curr_batch), make_layout(make_shape(M, N, L), cutlass::make_cute_packed_stride(InternalStrideD{}, {cumulative_M, N, 1})));
+        ElementD* ptr_D_curr_batch = reinterpret_cast<ElementD*>(params.ptr_D[next_group]) + (cumulative_M - M) * N;
+        mD_mnl = make_tensor(make_gmem_ptr(ptr_D_curr_batch), make_layout(make_shape(M, N, L), cutlass::make_cute_packed_stride(InternalStrideD{}, {M, N, 1})));
       }
       return cute::make_tuple(mC_mnl, mD_mnl);
     }

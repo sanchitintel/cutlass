@@ -431,15 +431,6 @@ template <class Gemm> struct ExampleRunner {
       ptr_B_host.at(i) = block_B.get() + offset_B.at(i);
       ptr_C_host.at(i) = block_C.get() + offset_C.at(i);
       ptr_D_host.at(i) = block_D.get() + offset_D.at(i);
-      // Fill host vector of alpha & beta with random values if using per-group
-      // values
-      alpha_host.push_back(
-          (options.alpha == FLT_MAX)
-              ? static_cast<ElementAccumulator>((rand() % 5) + 1)
-              : options.alpha);
-      beta_host.push_back((options.beta == FLT_MAX)
-                              ? static_cast<ElementAccumulator>(rand() % 5)
-                              : options.beta);
       // Fill host ptr vectors with offset addresses into device alpha/beta
       // blocks
       ptr_alpha_host.at(i) = block_alpha.get() + i;
@@ -573,9 +564,14 @@ template <class Gemm> struct ExampleRunner {
     // Verify that the result is correct
     bool passed = verify(options);
     std::cout << "Disposition: " << (passed ? "Passed" : "Failed") << std::endl;
-    initialize_for_moe_gemm(options);
-
     if(!passed) return cutlass::Status::kErrorInternal;
+    initialize_for_moe_gemm(options);
+    syclcompat::wait();
+    arguments = args_from_options(options, hw_info);
+    CUTLASS_CHECK(gemm_op.can_implement(arguments));
+
+    CUTLASS_CHECK(gemm_op.initialize(arguments, workspace.get()));
+    
 
     if (options.iterations > 0) {
       GPU_Clock timer;
