@@ -114,7 +114,7 @@ struct GroupGEMMOptions {
   float beta = 0.f;
   int iterations;
   int m, n, k, groups;
-  int* num_rows_per_expert = nullptr;
+  int *num_rows_per_expert = nullptr;
   std::vector<typename ProblemShape::UnderlyingProblemShape> problem_sizes_host;
 
   GroupGEMMOptions()
@@ -125,13 +125,14 @@ struct GroupGEMMOptions {
     }
   }
 
-  void parse(const int num_experts, const int *num_tokens_per_expert_host, int moe_n,
-             int moe_k, const int* num_tokens_per_expert_device=nullptr) {
+  void parse(const int num_experts, const int *num_tokens_per_expert_host,
+             int moe_n, int moe_k,
+             const int *num_tokens_per_expert_device = nullptr) {
     n = moe_n;
     k = moe_k;
     groups = num_experts;
     iterations = 100;
-    num_rows_per_expert = const_cast<int*>(num_tokens_per_expert_device);
+    num_rows_per_expert = const_cast<int *>(num_tokens_per_expert_device);
     assert(groups > 0);
     problem_sizes_host.clear();
     problem_sizes_host.reserve(groups);
@@ -475,7 +476,6 @@ template <class Gemm> struct ExampleRunner {
     block_beta.copy_from_host(beta_host.data());
   }
 
-
   /// Populates a Gemm::Arguments structure from the given commandline options
   typename Gemm::Arguments
   args_from_options(const GroupGEMMOptions &options,
@@ -564,14 +564,14 @@ template <class Gemm> struct ExampleRunner {
     // Verify that the result is correct
     bool passed = verify(options);
     std::cout << "Disposition: " << (passed ? "Passed" : "Failed") << std::endl;
-    if(!passed) return cutlass::Status::kErrorInternal;
+    if (!passed)
+      return cutlass::Status::kErrorInternal;
     initialize_for_moe_gemm(options);
     syclcompat::wait();
     arguments = args_from_options(options, hw_info);
     CUTLASS_CHECK(gemm_op.can_implement(arguments));
 
     CUTLASS_CHECK(gemm_op.initialize(arguments, workspace.get()));
-    
 
     if (options.iterations > 0) {
       GPU_Clock timer;
@@ -606,16 +606,18 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
              float *outputs, const int gemm_n, const int gemm_k,
              const int *num_rows_per_expert_device, const int num_experts) {
   GroupGEMMOptions options;
-  
+
   // The KernelHardwareInfo struct holds the number of EUs on the GPU with a
   // given device ID. This information is used by the underlying kernel.
   cutlass::KernelHardwareInfo hw_info;
   int num_tokens_incl_duplicated = 0;
   int total_rows_for_each_expert[128];
   cutlass::DeviceAllocation<int32_t> num_rows_per_expert_obj;
-  num_rows_per_expert_obj.reset(const_cast<int32_t*>(num_rows_per_expert_device), 128);
+  num_rows_per_expert_obj.reset(
+      const_cast<int32_t *>(num_rows_per_expert_device), 128);
   num_rows_per_expert_obj.copy_to_host(total_rows_for_each_expert);
-  options.parse(num_experts, total_rows_for_each_expert, gemm_n, gemm_k, num_rows_per_expert_device);
+  options.parse(num_experts, total_rows_for_each_expert, gemm_n, gemm_k,
+                num_rows_per_expert_device);
 
   for (int i = 0; i < num_experts; i++) {
     num_tokens_incl_duplicated += total_rows_for_each_expert[i];
@@ -649,7 +651,8 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
   constexpr int PipelineStages = 2;
   // Dispatch to grouped gemm algorithm
   using GEMMDispatchPolicy =
-      cutlass::gemm::MainloopIntelXeXMX16Group<PipelineStages, cutlass::gemm::KernelXeMoEGEMM>;
+      cutlass::gemm::MainloopIntelXeXMX16Group<PipelineStages,
+                                               cutlass::gemm::KernelXeMoEGEMM>;
   using EpilogueDispatchPolicy = cutlass::epilogue::IntelXeXMX16Group;
 
   using EpilogueOp = cutlass::epilogue::fusion::LinearCombination<
@@ -689,11 +692,10 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
 }
 
 void MoEGEMMWrapper(const bfloat16_t *activations, const bfloat16_t *weights,
-             float *outputs, const int gemm_n, const int gemm_k,
-             const int *total_rows_for_each_expert, const int num_experts, const int* num_rows_per_expert_device) {
-
-}
-
+                    float *outputs, const int gemm_n, const int gemm_k,
+                    const int *total_rows_for_each_expert,
+                    const int num_experts,
+                    const int *num_rows_per_expert_device) {}
 
 int main(int argc, const char **argv) {
   int total_rows_for_each_expert[128] = {
