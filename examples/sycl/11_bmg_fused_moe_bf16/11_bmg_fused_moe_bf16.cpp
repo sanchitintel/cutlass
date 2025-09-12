@@ -114,7 +114,7 @@ struct GroupGEMMOptions {
   float alpha = 1.f;
   float beta = 0.f;
   int iterations;
-  int m, n, k, groups;
+  int m=0, n=0, k=0, groups;
   int *num_rows_per_expert = nullptr;
   std::vector<typename ProblemShape::UnderlyingProblemShape> problem_sizes_host;
 
@@ -132,7 +132,7 @@ struct GroupGEMMOptions {
     n = moe_n;
     k = moe_k;
     groups = num_experts;
-    iterations = 100;
+    iterations = 2;
     num_rows_per_expert = const_cast<int *>(num_tokens_per_expert_device);
     assert(groups > 0);
     problem_sizes_host.clear();
@@ -711,8 +711,8 @@ int main(int argc, const char **argv) {
   for (int i = 0; i < num_experts; i++) {
     num_tokens_incl_duplicated += total_rows_for_each_expert[i];
   }
-  int n_moe = 32;
-  int k_moe = 32;
+  int n_moe = 1536;
+  int k_moe = 1024;
 
   cutlass::DeviceAllocation<int32_t> num_rows_per_expert_device;
   cutlass::DeviceAllocation<bfloat16_t> activations_data;

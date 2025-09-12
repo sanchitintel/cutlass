@@ -274,6 +274,8 @@ public:
         *reinterpret_cast<SharedStorage *>(smem_buf);
 
     TileScheduler scheduler{params.scheduler};
+    scheduler.update_num_tokens_per_expert(
+        const_cast<int32_t *>(params.M_per_group));
     auto work_tile_info = scheduler.initial_work_tile_info(ClusterShape{});
     constexpr auto workgroup_shape =
         WorkgroupTileShape{}; // (BLK_M,BLK_N,BLK_K)
