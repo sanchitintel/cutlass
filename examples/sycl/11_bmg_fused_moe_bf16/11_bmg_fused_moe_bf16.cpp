@@ -245,7 +245,7 @@ template <class Gemm> struct ExampleRunner {
       cutlass::TensorRef ref_A(block_A.get() + offset_A.at(i),
                                LayoutA::packed({M, K}));
       cutlass::TensorRef ref_B(block_B.get() + offset_B.at(i),
-                               cutlass::layout::RowMajor::packed({N, K}));
+                               LayoutB::packed({K, N}));
       cutlass::TensorRef ref_C(block_C.get() + offset_C.at(i),
                                LayoutC::packed({M, N}));
       cutlass::TensorRef ref_D(block_ref_D.get() + offset_D.at(i),
@@ -638,7 +638,7 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
   using LayoutD = cutlass::layout::RowMajor;
 
   using GmemTiledCopyA = XE_2D_U16x32x32_LD_N;
-  using GmemTiledCopyB = XE_2D_U16x32x32_LD_V;
+  using GmemTiledCopyB = XE_2D_U16x16x16_LD_T;
 
   // Workgroup-level tile
   using TileShape = Shape<_256, _256, _32>;
@@ -670,7 +670,7 @@ void MoEGEMM(const bfloat16_t *activations, const bfloat16_t *weights,
   using CollectiveMainloop = cutlass::gemm::collective::CollectiveMma<
       GEMMDispatchPolicy, TileShape, ElementA,
       cutlass::gemm::TagToStrideA_t<LayoutA *>, ElementB,
-      cutlass::gemm::TagToStrideA_t<LayoutB *>, TiledMma, GmemTiledCopyA, void,
+      cutlass::gemm::TagToStrideB_t<LayoutB *>, TiledMma, GmemTiledCopyA, void,
       void, cute::identity,                      // A
       GmemTiledCopyB, void, void, cute::identity // B
       >;
